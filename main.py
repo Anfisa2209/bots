@@ -1,113 +1,106 @@
-# Импортируем необходимые классы.
-import datetime
+from telegram import ReplyKeyboardMarkup
+from telegram.ext import Application, CommandHandler
 
-from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove
-from telegram.ext import Application, MessageHandler, filters, CommandHandler
+import random
+import math
 
 from config import BOT_TOKEN
 
-reply_keyboard = [['/start', '/help', '/time', '/date'],
-                  ['/set', '/unset']]
-markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=False)
+base_keyboard = [['/dice', '/timer']]
+dice_keyboard = [['/6', '/2x6', '/20', '/back']]
+timer_keyboard = [['/30s', '/1m', '/5m', '/back']]
+close_keyboard = [['/close']]
+
+base_markup = ReplyKeyboardMarkup(base_keyboard, one_time_keyboard=False)
+dice_markup = ReplyKeyboardMarkup(dice_keyboard, one_time_keyboard=False)
+timer_markup = ReplyKeyboardMarkup(timer_keyboard, one_time_keyboard=False)
+active_timer_markup = ReplyKeyboardMarkup(close_keyboard, one_time_keyboard=False)
 
 
 async def start(update, context):
-    """Отправляет сообщение когда получена команда /start"""
-    user = update.effective_user
-    await update.message.reply_html(
-        rf"Привет {user.mention_html()}! Я эхо-бот. Напишите мне что-нибудь, и я пришлю это назад!",
-        reply_markup=markup
-    )
+    await update.message.reply_text('Привет! Я бот-гадалка!')
+    await update.message.reply_text("/dice: кинуть кубики, /timer: засечь время", reply_markup=base_markup)
 
 
-async def help_command(update, context):
-    """Отправляет сообщение когда получена команда /help"""
-    await update.message.reply_text("Я пока не умею помогать... Я только ваше эхо.",
-                                    reply_markup=markup)
+async def dices(update, context):
+    await update.message.reply_text("кинуть кубики: 6 граней, 2 по 6, 20 или вернуться назад", reply_markup=dice_markup)
 
 
-async def echo(update, context):
-    await update.message.reply_text(f"Я получил сообщение {update.message.text}.",
-                                    reply_markup=markup)
+async def dice6(update, context):
+    number = math.trunc(random.random() * 6) + 1
+    await update.message.reply_text("{0}".format(number))
 
 
-async def time(update, context):
-    await update.message.reply_text(f"Сейчас {datetime.datetime.now().strftime('%H:%M:%S')}",
-                                    reply_markup=markup)
+async def dice2x6(update, context):
+    number1 = math.trunc(random.random() * 6) + 1
+    number2 = math.trunc(random.random() * 6) + 1
+    await update.message.reply_text("{0} {1}".format(number1, number2))
 
 
-async def date(update, context):
-    await update.message.reply_text(f"Сегодня {datetime.datetime.today().strftime('%d.%m.%Y')}",
-                                    reply_markup=markup)
+async def dice20(update, context):
+    number = math.trunc(random.random() * 20) + 1
+    await update.message.reply_text("{0}".format(number))
 
 
-TIMER = 5  # таймер на 5 секунд
+# Управление таймерами.
+
+async def timers(update, context):
+    await update.message.reply_text("засечь: 30 сек., 1 мин., 5 мин.  или вернуться назад", reply_markup=timer_markup)
 
 
-async def close_keyboard(update, context):
-    await update.message.reply_text(
-        "Ok",
-        reply_markup=ReplyKeyboardRemove()
-    )
+async def set_timer(update, context, delay):
+    job = context.job_queue.run_once(finish_timer, delay, chat_id=update.message.chat_id, data=delay)
+
+    context.chat_data['job'] = job
+    await update.message.reply_text(f'Установлен таймер на {delay} секунд', reply_markup=active_timer_markup)
 
 
-def remove_job_if_exists(name, context):
-    current_jobs = context.job_queue.get_jobs_by_name(name)
-    if not current_jobs:
-        return False
-    for job in current_jobs:
-        job.schedule_removal()
-    return True
+async def finish_timer(context):
+    job = context.job
+    await context.bot.send_message(job.chat_id, text='Время истекло.', reply_markup=timer_markup)
 
 
-async def task(context):
-    """Выводит сообщение"""
-    await context.bot.send_message(context.job.chat_id, text=f'КУКУ! {TIMER}c. прошли!')
+async def reset_timer(update, context):
+    if 'job' in context.chat_data:
+        context.chat_data['job'].schedule_removal()
+        del context.chat_data['job']
+
+    await update.message.reply_text('Таймер сброшен.', reply_markup=timer_markup)
 
 
-async def unset(update, context):
-    """Удаляет задачу, если пользователь передумал"""
-    chat_id = update.message.chat_id
-    job_removed = remove_job_if_exists(str(chat_id), context)
-    text = f'Таймер отменен!' if job_removed else f'У вас нет активных таймеров.'
-    await update.message.reply_text(text)
+# Таймеры
+
+async def timer30s(update, context):
+    await set_timer(update, context, 30)
 
 
-async def set_timer(update, context):
-    global TIMER
-    chat_id = update.effective_message.chat_id
-    try:
-        TIMER = int(context.args[0])
-    except (IndexError, ValueError):
-        TIMER = 5
-    if TIMER < 0:
-        await update.effective_message.reply_text("Так нельзя!!")
-        return
+async def timer1m(update, context):
+    await set_timer(update, context, 60)
 
-    job_removed = remove_job_if_exists(str(chat_id), context)
-    context.job_queue.run_once(task, TIMER, chat_id=chat_id, name=str(chat_id), data=TIMER)
 
-    text = f'Вернусь через {TIMER} с.!'
-    if job_removed:
-        text += " Старая задача удалена."
-    await update.effective_message.reply_text(text)
+async def timer5m(update, context):
+    await set_timer(update, context, 300)
 
 
 def main():
     application = Application.builder().token(BOT_TOKEN).build()
 
-    application.add_handler(CommandHandler("close", close_keyboard))
-
+    # Переключение режимов
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("time", time))
-    application.add_handler(CommandHandler("date", date))
-    application.add_handler(CommandHandler("set", set_timer))
-    application.add_handler(CommandHandler("unset", unset))
+    application.add_handler(CommandHandler("dice", dices))
+    application.add_handler(CommandHandler("timer", timers))
+    application.add_handler(CommandHandler("back", start))
 
-    text_handler = MessageHandler(filters.TEXT & ~filters.COMMAND, echo)
+    # Кубики
+    application.add_handler(CommandHandler("6", dice6))
+    application.add_handler(CommandHandler("2x6", dice2x6))
+    application.add_handler(CommandHandler("20", dice20))
 
-    application.add_handler(text_handler)
+    # Таймеры
+    application.add_handler(CommandHandler("30s", timer30s))
+    application.add_handler(CommandHandler("1m", timer1m))
+    application.add_handler(CommandHandler("5m", timer5m))
+    application.add_handler(CommandHandler("close", reset_timer))
 
     application.run_polling()
 
