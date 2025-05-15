@@ -1,72 +1,52 @@
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 from config import BOT_TOKEN
 
-hols = {
-    1: [
-        [InlineKeyboardButton('Зал 2 - скульптуры', callback_data='go_2')],
-        [InlineKeyboardButton('Выход', callback_data='button_exit')]
-    ],
-    2: [[InlineKeyboardButton('Зал 3 - картины', callback_data='go_3')]],
-    3: [
-        [InlineKeyboardButton('Зал 1 - хол', callback_data='go_1')],
-        [InlineKeyboardButton('Зал 4 - буфет', callback_data='go_4')]
-    ],
-    4: [[InlineKeyboardButton('Зал 1 - хол', callback_data='go_1')]]
-}
+poet = [i.strip() for i in open('poet.txt', encoding='utf8').readlines() if i.strip()]
 
 
 async def start(update, context):
-    reply_markup = InlineKeyboardMarkup(hols[1])
-    await update.message.reply_text(
-        'Добро пожаловать! Пожалуйста, сдайте верхнюю одежду в гардероб!\n'
-        'Вы в холе (зал 1).\n'
-        'Куда пойти дальше? Выбирайте:',
-        reply_markup=reply_markup
-    )
+    context.user_data['cur_line'] = 0
+    await update.message.reply_text(poet[0])
 
 
-async def button_callback(update, context):
-    query = update.callback_query
-    await query.answer()
+async def check_line(update, context):
+    user_data = context.user_data
+    cur_line = user_data.get('cur_line', 0)
 
-    if query.data == 'go_2':
-        await query.message.reply_text(
-            'Добро пожаловать! Пожалуйста, сдайте верхнюю одежду в гардероб!\n'
-            'В этом зале вы видите скульптуры (зал 2).\n'
-            'Куда пойти дальше? Выбирайте:',
-            reply_markup=InlineKeyboardMarkup(hols[2])
-        )
-    elif query.data == 'button_exit':
-        await query.message.reply_text('Всего доброго, не забудьте забрать верхнюю одежду в гардеробе!')
-    elif query.data == 'go_1':
-        await query.message.reply_text(
-            'Добро пожаловать! Пожалуйста, сдайте верхнюю одежду в гардероб!\n'
-            'Вы в холе (зал 1).\n'
-            'Куда пойти дальше? Выбирайте:',
-            reply_markup=InlineKeyboardMarkup(hols[1])
-        )
-    elif query.data == 'go_3':
-        await query.message.reply_text(
-            'Добро пожаловать! Пожалуйста, сдайте верхнюю одежду в гардероб!\n'
-            'В этом зале вы видите картины (зал 3).\n'
-            'Куда пойти дальше? Выбирайте:',
-            reply_markup=InlineKeyboardMarkup(hols[3])
-        )
-    elif query.data == 'go_4':
-        await query.message.reply_text(
-            'Добро пожаловать! Пожалуйста, сдайте верхнюю одежду в гардероб!\n'
-            'В этом зале можно поесть (зал 4).\n'
-            'Куда пойти дальше? Выбирайте:',
-            reply_markup=InlineKeyboardMarkup(hols[4])
-        )
+    user_text = update.message.text
+    correct_text = poet[cur_line + 1] if cur_line + 1 < len(poet) else ""
+
+    if user_text == correct_text:
+        user_data['cur_line'] = cur_line + 2
+        if user_data['cur_line'] >= len(poet):
+            await update.message.reply_text("Радость-то какая! Мы смогли! Давайте еще раз прочитаем?\nЕсли хотите повторить, нажмите /start")
+        else:
+            await update.message.reply_text(poet[user_data['cur_line']])
+    else:
+        await update.message.reply_text('Нет, не так')
+        await suphler(update, context)
+
+
+async def suphler(update, context):
+    user_data = context.user_data
+    cur_line = user_data.get('cur_line', 0)
+    if cur_line + 1 < len(poet):
+        right_line = poet[cur_line + 1]
+        await update.message.reply_text(f'Подсказка:\n{right_line[:len(right_line) // 2]}...')
+
+
+async def stop(update, context):
+    context.user_data.clear()
+    await update.message.reply_text('Ужас, уходите, не дочитав стих! Ну и ладно, до свидания!')
 
 
 def main():
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(button_callback))
+    application.add_handler(CommandHandler("stop", stop))
+
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, check_line))
     application.run_polling()
 
 
