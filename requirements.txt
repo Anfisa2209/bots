@@ -1,0 +1,2 @@
+python-telegram-bot[ext]
+translate==3.6.1

@@ -1,99 +1,71 @@
-import json
-import random
+import re
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler
+from translate import Translator
 
 from config import BOT_TOKEN
 
-with open('questions.json', encoding='utf8') as json_file:
-    data = json.load(json_file)['questions']
-
 
 async def start(update, context):
-    context.user_data['answers'] = {'questions': [], 'right_answers': 0, 'wrong_answers': 0}
-    context.user_data['game_on'] = False
-
-    reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton('Да', callback_data='yes')],
-                                         [InlineKeyboardButton('Нет', callback_data='no')]])
+    context.user_data['language'] = ''
+    reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton('Перевести на русский', callback_data='ru')],
+                                         [InlineKeyboardButton('Перевести на английский', callback_data='en')]])
 
     await update.message.reply_text(
-        'Знание литературы проверили, теперь проверим знание истории😊. Ответьте на 10 вопросов.',
+        'Я могу переводить слова или предложение! Выбери, на какой язык перевести:',
         reply_markup=reply_markup)
 
 
-async def ask_question(context, chat_id):
+async def translate_sentences(update, context):
     user_data = context.user_data
-    answers = user_data['answers']
+    original_word = update.message.text
+    normalized_word = normalize(original_word)
+    language = user_data.get('language', 'en')
+    reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton('Переводить на русский', callback_data='ru')],
+                                         [InlineKeyboardButton('Переводить на английский', callback_data='en')]])
+    if normalized_word:
+        translation = translate(original_word, language)
 
-    # Выбираем вопрос, которого ещё не было
-    available_questions = [q for q in data if q['question'] not in [item[0] for item in answers['questions']]]
-
-    if not available_questions:
-        await context.bot.send_message(chat_id, "Все вопросы закончились!")
-        return
-    question_data = random.choice(available_questions)
-    question = question_data['question']
-    response = question_data['response']
-
-    answers['questions'].append((question, response))
-
-    await context.bot.send_message(
-        chat_id,
-        f'Уважаемые знатоки, внимание на экран:\nВопрос {len(answers["questions"])}: {question}'
-    )
-
-
-async def stop(update, context):
-    context.user_data.clear()
-    await update.message.reply_text('Как, уже уходите? Ну и ладно, до свидания!')
+        await update.message.reply_text(text=translation, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text=original_word, reply_markup=reply_markup)
 
 
 async def button_callback(update, context):
     query = update.callback_query
     await query.answer()
 
-    if query.data == 'yes':
-        await query.edit_message_text(text='Да начнется игра!')
-        context.user_data['game_on'] = True
-        chat_id = query.message.chat.id
-        await ask_question(context, chat_id)
-    elif query.data == 'no':
-        await query.edit_message_text(text='Не хотите проверять знания по истории? Ну и ладно! До свидания!')
+    if query.data == 'en':
+        context.user_data['language'] = 'en'
+        await query.message.reply_text(text='Напишите что-нибудь по-русски - и я переведу на английский')
+
+    elif query.data == 'ru':
+        context.user_data['language'] = 'ru'
+        await query.message.reply_text(text='Напишите что-нибудь по-английски - и я переведу на русский')
 
 
-async def check_response(update, context):
-    if context.user_data.get('game_on', False):
-        user_answer = update.message.text
-        answers = context.user_data['answers']
+def translate(word: str, dest):
+    if len(word) > 50:
+        return 'Слишком длинное предложение...'
+    from_lang = 'ru' if dest == 'en' else 'en'
+    translator = Translator(to_lang=dest, from_lang=from_lang)
+    description = 'русский' if dest == 'ru' else "английский"
+    translation = translator.translate(word)
+    return f'Вот перевод "{word.capitalize()}" на {description} язык:\n{translation}'
 
-        current_question = answers['questions'][-1]
-        right_answer = current_question[1]
 
-        if user_answer.strip() == right_answer.strip():
-            answers['right_answers'] += 1
-            await update.message.reply_text('Совершенно верно!')
-        else:
-            answers['wrong_answers'] += 1
-            await update.message.reply_text(f'Неверно! Правильный ответ: {right_answer}. Пойдемте дальше')
-
-        if len(answers['questions']) >= 10:
-            await update.message.reply_text(
-                f"Игра окончена! Правильных ответов: {answers['right_answers']}, "
-                f"Неправильных: {answers['wrong_answers']}"
-            )
-            context.user_data.clear()
-        else:
-            chat_id = update.message.chat.id
-            await ask_question(context, chat_id)
+def normalize(word):
+    # удаляем знаки препинания
+    return re.sub(r'[^\w\s]', '', word)
 
 
 def main():
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("stop", stop))
+
     application.add_handler(CallbackQueryHandler(button_callback))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, check_response))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, translate_sentences))
     application.run_polling()
 
 
