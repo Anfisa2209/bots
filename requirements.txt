@@ -1,2 +1,5 @@
 python-telegram-bot[ext]
 translate==3.6.1
+requests~=2.32.3
+urllib3~=2.4.0
+aiohttp~=3.11.18
